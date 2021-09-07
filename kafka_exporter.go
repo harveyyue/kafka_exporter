@@ -83,7 +83,6 @@ type kafkaOpts struct {
 	realm                    string
 	keyTabPath               string
 	kerberosAuthType         string
-
 }
 
 // CanReadCertAndKey returns true if the certificate and key files already exists,
@@ -425,18 +424,28 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		}
 		for _, group := range describeGroups.Groups {
 			offsetFetchRequest := sarama.OffsetFetchRequest{ConsumerGroup: group.GroupId, Version: 1}
-			for _, member := range group.Members {
-				assignment, err := member.GetMemberAssignment()
-				if err != nil {
-					plog.Errorf("Cannot get GetMemberAssignment of group member %v : %v", member, err)
-					return
+			if group.State == "Stable" {
+				for _, member := range group.Members {
+					assignment, err := member.GetMemberAssignment()
+					if err != nil {
+						plog.Errorf("Cannot get GetMemberAssignment of group member %v : %v", member, err)
+						return
+					}
+					for topic, partitions := range assignment.Topics {
+						for _, partition := range partitions {
+							offsetFetchRequest.AddPartition(topic, partition)
+						}
+					}
 				}
-				for topic, partions := range assignment.Topics {
-					for _, partition := range partions {
+			} else {
+				// not really know what topic/partition this consumer group subscribe, so ask for all
+				for topic, partitions := range offset {
+					for partition := range partitions {
 						offsetFetchRequest.AddPartition(topic, partition)
 					}
 				}
 			}
+
 			ch <- prometheus.MustNewConstMetric(
 				consumergroupMembers, prometheus.GaugeValue, float64(len(group.Members)), group.GroupId,
 			)
